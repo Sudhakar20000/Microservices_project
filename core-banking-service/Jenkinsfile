@@ -1,5 +1,6 @@
 pipeline {
     agent { label 'Node1' }
+
     environment {
         JAVA_HOME    = "/usr/lib/jvm/java-21-openjdk-amd64"
         PATH         = "${JAVA_HOME}/bin:${env.PATH}"
@@ -8,47 +9,92 @@ pipeline {
         SERVICE_NAME = "core-banking"
         IMAGE_TAG    = "${BUILD_NUMBER}"
     }
+
     stages {
-        stage('Checkout') { steps { checkout scm } }
-        stage('Build & Test') {
-            steps { dir("${SERVICE_DIR}") { sh 'chmod +x gradlew && ./gradlew clean build --no-daemon' } }
-            post { always { junit allowEmptyResults: true, testResults: "${SERVICE_DIR}/build/test-results/**/*.xml" } }
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+                echo "Building: core-banking | Branch: ${env.BRANCH_NAME} | Tag: ${IMAGE_TAG}"
+            }
         }
+
+        stage('Build & Test') {
+            steps {
+                dir("core-banking-service") {
+                    sh 'chmod +x gradlew'
+                    sh './gradlew clean build --no-daemon'
+                }
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true,
+                          testResults: "core-banking-service/build/test-results/**/*.xml"
+                }
+            }
+        }
+
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonarqube-scanner') {
                     script {
                         def scannerHome = tool 'sonarqube-scanner'
-                        dir("${SERVICE_DIR}") {
-                            sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=ib-${SERVICE_NAME} -Dsonar.projectName=ib-${SERVICE_NAME} -Dsonar.sources=src/main -Dsonar.tests=src/test -Dsonar.java.binaries=build/classes/java/main -Dsonar.exclusions=**/build/**"
+                        dir("core-banking-service") {
+                            sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=ib-core-banking -Dsonar.projectName=ib-core-banking -Dsonar.sources=src/main -Dsonar.tests=src/test -Dsonar.java.binaries=build/classes/java/main -Dsonar.exclusions=**/build/**"
                         }
                     }
                 }
             }
         }
-        stage('Quality Gate') { steps { timeout(time: 5, unit: 'MINUTES') { waitForQualityGate abortPipeline: true } } }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
         stage('Docker Build & Push') {
             steps {
-                dir("${SERVICE_DIR}") {
-                    docker.withRegistry('https://index.docker.io/v1/', 'Dockerhub') {
-                        def img = docker.build("${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG}", ".")
-                        img.push(); img.push('latest')
+                script {
+                    dir("core-banking-service") {
+                        docker.withRegistry('https://index.docker.io/v1/', 'Dockerhub') {
+                            def img = docker.build("sudhakar20000/ib-core-banking:${BUILD_NUMBER}", ".")
+                            img.push()
+                            img.push('latest')
+                        }
                     }
                 }
             }
         }
+
         stage('Deploy to Kubernetes') {
             steps {
                 withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
-                    sh "kubectl set image deployment/${SERVICE_NAME} ${SERVICE_NAME}=${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG} -n banking --kubeconfig=\$KUBECONFIG"
-                    sh "kubectl rollout status deployment/${SERVICE_NAME} -n banking --timeout=300s --kubeconfig=\$KUBECONFIG"
+                    sh """
+                        kubectl set image deployment/core-banking \
+                            core-banking=sudhakar20000/ib-core-banking:${BUILD_NUMBER} \
+                            -n banking --kubeconfig=\$KUBECONFIG
+
+                        kubectl rollout status deployment/core-banking \
+                            -n banking --timeout=300s --kubeconfig=\$KUBECONFIG
+                    """
                 }
             }
         }
-        stage('Cleanup') { steps { sh "docker rmi ${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG} || true"; cleanWs() } }
+
+        stage('Cleanup') {
+            steps {
+                sh "docker rmi sudhakar20000/ib-core-banking:${BUILD_NUMBER} || true"
+                sh "docker rmi sudhakar20000/ib-core-banking:latest || true"
+                cleanWs()
+            }
+        }
     }
+
     post {
-        success { echo "✅ ${SERVICE_NAME} SUCCESS" }
-        failure { echo "❌ ${SERVICE_NAME} FAILED" }
+        success { echo "✅ core-banking pipeline SUCCESS" }
+        failure { echo "❌ core-banking pipeline FAILED" }
     }
 }
