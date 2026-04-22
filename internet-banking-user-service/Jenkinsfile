@@ -2,12 +2,12 @@ pipeline {
     agent { label 'Node1' }
 
     environment {
-        JAVA_HOME   = "/usr/lib/jvm/java-21-openjdk-amd64"
-        PATH        = "${JAVA_HOME}/bin:${env.PATH}"
-        DOCKER_USER = "sudhakar20000"
-        SERVICE_DIR = "internet-banking-user-service"
+        JAVA_HOME    = "/usr/lib/jvm/java-21-openjdk-amd64"
+        PATH         = "${JAVA_HOME}/bin:${env.PATH}"
+        DOCKER_USER  = "sudhakar20000"
+        SERVICE_DIR  = "internet-banking-user-service"
         SERVICE_NAME = "user-service"
-        IMAGE_TAG   = "${BUILD_NUMBER}"
+        IMAGE_TAG    = "${BUILD_NUMBER}"
     }
 
     stages {
@@ -65,11 +65,13 @@ pipeline {
 
         stage('Docker Build & Push') {
             steps {
-                dir("${SERVICE_DIR}") {
-                    docker.withRegistry('https://index.docker.io/v1/', 'Dockerhub') {
-                        def img = docker.build("${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG}", ".")
-                        img.push()
-                        img.push('latest')
+                script {
+                    dir("${SERVICE_DIR}") {
+                        docker.withRegistry('https://index.docker.io/v1/', 'Dockerhub') {
+                            def img = docker.build("${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG}", ".")
+                            img.push()
+                            img.push('latest')
+                        }
                     }
                 }
             }
@@ -100,7 +102,7 @@ pipeline {
     }
 
     post {
-        success { echo "✅ ${SERVICE_NAME} pipeline SUCCESS" }
+        success { echo "✅ ${SERVICE_NAME} pipeline SUCCESS — image: ${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG}" }
         failure { echo "❌ ${SERVICE_NAME} pipeline FAILED" }
     }
 }
