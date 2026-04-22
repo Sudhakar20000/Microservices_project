@@ -1,5 +1,6 @@
 pipeline {
     agent { label 'Node1' }
+
     environment {
         JAVA_HOME    = "/usr/lib/jvm/java-21-openjdk-amd64"
         PATH         = "${JAVA_HOME}/bin:${env.PATH}"
@@ -8,47 +9,92 @@ pipeline {
         SERVICE_NAME = "service-registry"
         IMAGE_TAG    = "${BUILD_NUMBER}"
     }
+
     stages {
-        stage('Checkout') { steps { checkout scm } }
-        stage('Build & Test') {
-            steps { dir("${SERVICE_DIR}") { sh 'chmod +x gradlew && ./gradlew clean build --no-daemon' } }
-            post { always { junit allowEmptyResults: true, testResults: "${SERVICE_DIR}/build/test-results/**/*.xml" } }
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+                echo "Building: service-registry | Branch: ${env.BRANCH_NAME} | Tag: ${IMAGE_TAG}"
+            }
         }
+
+        stage('Build & Test') {
+            steps {
+                dir("internet-banking-service-registry") {
+                    sh 'chmod +x gradlew'
+                    sh './gradlew clean build --no-daemon'
+                }
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true,
+                          testResults: "internet-banking-service-registry/build/test-results/**/*.xml"
+                }
+            }
+        }
+
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonarqube-scanner') {
                     script {
                         def scannerHome = tool 'sonarqube-scanner'
-                        dir("${SERVICE_DIR}") {
-                            sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=ib-${SERVICE_NAME} -Dsonar.projectName=ib-${SERVICE_NAME} -Dsonar.sources=src/main -Dsonar.tests=src/test -Dsonar.java.binaries=build/classes/java/main -Dsonar.exclusions=**/build/**"
+                        dir("internet-banking-service-registry") {
+                            sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=ib-service-registry -Dsonar.projectName=ib-service-registry -Dsonar.sources=src/main -Dsonar.tests=src/test -Dsonar.java.binaries=build/classes/java/main -Dsonar.exclusions=**/build/**"
                         }
                     }
                 }
             }
         }
-        stage('Quality Gate') { steps { timeout(time: 5, unit: 'MINUTES') { waitForQualityGate abortPipeline: true } } }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
         stage('Docker Build & Push') {
             steps {
-                dir("${SERVICE_DIR}") {
-                    docker.withRegistry('https://index.docker.io/v1/', 'Dockerhub') {
-                        def img = docker.build("${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG}", ".")
-                        img.push(); img.push('latest')
+                script {
+                    dir("internet-banking-service-registry") {
+                        docker.withRegistry('https://index.docker.io/v1/', 'Dockerhub') {
+                            def img = docker.build("sudhakar20000/ib-service-registry:${BUILD_NUMBER}", ".")
+                            img.push()
+                            img.push('latest')
+                        }
                     }
                 }
             }
         }
+
         stage('Deploy to Kubernetes') {
             steps {
                 withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
-                    sh "kubectl set image deployment/${SERVICE_NAME} ${SERVICE_NAME}=${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG} -n banking --kubeconfig=\$KUBECONFIG"
-                    sh "kubectl rollout status deployment/${SERVICE_NAME} -n banking --timeout=300s --kubeconfig=\$KUBECONFIG"
+                    sh """
+                        kubectl set image deployment/service-registry \
+                            service-registry=sudhakar20000/ib-service-registry:${BUILD_NUMBER} \
+                            -n banking --kubeconfig=\$KUBECONFIG
+
+                        kubectl rollout status deployment/service-registry \
+                            -n banking --timeout=300s --kubeconfig=\$KUBECONFIG
+                    """
                 }
             }
         }
-        stage('Cleanup') { steps { sh "docker rmi ${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG} || true"; cleanWs() } }
+
+        stage('Cleanup') {
+            steps {
+                sh "docker rmi sudhakar20000/ib-service-registry:${BUILD_NUMBER} || true"
+                sh "docker rmi sudhakar20000/ib-service-registry:latest || true"
+                cleanWs()
+            }
+        }
     }
+
     post {
-        success { echo "✅ ${SERVICE_NAME} SUCCESS" }
-        failure { echo "❌ ${SERVICE_NAME} FAILED" }
+        success { echo "✅ service-registry pipeline SUCCESS" }
+        failure { echo "❌ service-registry pipeline FAILED" }
     }
 }
