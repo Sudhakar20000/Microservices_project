@@ -19,17 +19,11 @@ pipeline {
             }
         }
 
-        stage('Build & Test') {
+        stage('Build') {
             steps {
                 dir("core-banking-service") {
                     sh 'chmod +x gradlew'
                     sh './gradlew clean build -x test --no-daemon'
-                }
-            }
-            post {
-                always {
-                    junit allowEmptyResults: true,
-                          testResults: "core-banking-service/build/test-results/**/*.xml"
                 }
             }
         }
@@ -40,7 +34,14 @@ pipeline {
                     script {
                         def scannerHome = tool 'sonarqube-scanner'
                         dir("core-banking-service") {
-                            sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=ib-core-banking -Dsonar.projectName=ib-core-banking -Dsonar.sources=src/main -Dsonar.tests=src/test -Dsonar.java.binaries=build/classes/java/main -Dsonar.exclusions=**/build/**"
+                            sh """
+                            ${scannerHome}/bin/sonar-scanner \
+                              -Dsonar.projectKey=ib-core-banking \
+                              -Dsonar.projectName=ib-core-banking \
+                              -Dsonar.sources=src/main \
+                              -Dsonar.java.binaries=build/classes/java/main \
+                              -Dsonar.exclusions=**/build/**
+                            """
                         }
                     }
                 }
@@ -60,7 +61,7 @@ pipeline {
                 script {
                     dir("core-banking-service") {
                         docker.withRegistry('https://index.docker.io/v1/', 'Dockerhub') {
-                            def img = docker.build("sudhakar20000/ib-core-banking:${BUILD_NUMBER}", ".")
+                            def img = docker.build("/ib-core-banking:${BUILD_NUMBER}", ".")
                             img.push()
                             img.push('latest')
                         }
@@ -73,12 +74,23 @@ pipeline {
             steps {
                 withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
                     sh """
-                        kubectl set image deployment/core-banking \
-                            core-banking=sudhakar20000/ib-core-banking:${BUILD_NUMBER} \
-                            -n banking --kubeconfig=\$KUBECONFIG
+                        # Step 1: Ensure namespace exists
+                        kubectl create namespace banking \
+                            --kubeconfig=$KUBECONFIG \
+                            --dry-run=client -o yaml | \
+                            kubectl apply -f - --kubeconfig=$KUBECONFIG
 
+                        # Step 2: Update image tag on existing deployment
+                        kubectl set image deployment/core-banking \
+                            core-banking=/ib-core-banking:${BUILD_NUMBER} \
+                            -n banking \
+                            --kubeconfig=$KUBECONFIG
+
+                        # Step 3: Wait for rollout to complete
                         kubectl rollout status deployment/core-banking \
-                            -n banking --timeout=300s --kubeconfig=\$KUBECONFIG
+                            -n banking \
+                            --timeout=300s \
+                            --kubeconfig=$KUBECONFIG
                     """
                 }
             }
@@ -86,15 +98,15 @@ pipeline {
 
         stage('Cleanup') {
             steps {
-                sh "docker rmi sudhakar20000/ib-core-banking:${BUILD_NUMBER} || true"
-                sh "docker rmi sudhakar20000/ib-core-banking:latest || true"
+                sh "docker rmi /ib-core-banking:${BUILD_NUMBER} || true"
+                sh "docker rmi /ib-core-banking:latest || true"
                 cleanWs()
             }
         }
     }
 
     post {
-        success { echo "✅ core-banking pipeline SUCCESS" }
+        success { echo "✅ core-banking pipeline SUCCESS — image: /ib-core-banking:${BUILD_NUMBER}" }
         failure { echo "❌ core-banking pipeline FAILED" }
     }
 }
