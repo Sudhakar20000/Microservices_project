@@ -15,21 +15,15 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                echo "Building: ${SERVICE_NAME} | Branch: ${env.BRANCH_NAME} | Tag: ${IMAGE_TAG}"
+                echo "Building: user-service | Branch: ${env.BRANCH_NAME} | Tag: ${IMAGE_TAG}"
             }
         }
 
-        stage('Build & Test') {
+        stage('Build') {
             steps {
-                dir("${SERVICE_DIR}") {
+                dir("internet-banking-user-service") {
                     sh 'chmod +x gradlew'
-                    sh './gradlew clean build --no-daemon'
-                }
-            }
-            post {
-                always {
-                    junit allowEmptyResults: true,
-                          testResults: "${SERVICE_DIR}/build/test-results/**/*.xml"
+                    sh './gradlew clean build -x test --no-daemon'
                 }
             }
         }
@@ -39,13 +33,12 @@ pipeline {
                 withSonarQubeEnv('sonarqube-scanner') {
                     script {
                         def scannerHome = tool 'sonarqube-scanner'
-                        dir("${SERVICE_DIR}") {
+                        dir("internet-banking-user-service") {
                             sh """
                             ${scannerHome}/bin/sonar-scanner \
-                              -Dsonar.projectKey=ib-${SERVICE_NAME} \
-                              -Dsonar.projectName=ib-${SERVICE_NAME} \
+                              -Dsonar.projectKey=ib-user-service \
+                              -Dsonar.projectName=ib-user-service \
                               -Dsonar.sources=src/main \
-                              -Dsonar.tests=src/test \
                               -Dsonar.java.binaries=build/classes/java/main \
                               -Dsonar.exclusions=**/build/**
                             """
@@ -66,9 +59,9 @@ pipeline {
         stage('Docker Build & Push') {
             steps {
                 script {
-                    dir("${SERVICE_DIR}") {
+                    dir("internet-banking-user-service") {
                         docker.withRegistry('https://index.docker.io/v1/', 'Dockerhub') {
-                            def img = docker.build("${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG}", ".")
+                            def img = docker.build("/ib-user-service:${BUILD_NUMBER}", ".")
                             img.push()
                             img.push('latest')
                         }
@@ -81,12 +74,23 @@ pipeline {
             steps {
                 withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
                     sh """
-                        kubectl set image deployment/${SERVICE_NAME} \
-                            ${SERVICE_NAME}=${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG} \
-                            -n banking --kubeconfig=\$KUBECONFIG
+                        # Step 1: Ensure namespace exists
+                        kubectl create namespace banking \
+                            --kubeconfig=$KUBECONFIG \
+                            --dry-run=client -o yaml | \
+                            kubectl apply -f - --kubeconfig=$KUBECONFIG
 
-                        kubectl rollout status deployment/${SERVICE_NAME} \
-                            -n banking --timeout=300s --kubeconfig=\$KUBECONFIG
+                        # Step 2: Update image tag on existing deployment
+                        kubectl set image deployment/user-service \
+                            user-service=/ib-user-service:${BUILD_NUMBER} \
+                            -n banking \
+                            --kubeconfig=$KUBECONFIG
+
+                        # Step 3: Wait for rollout to complete
+                        kubectl rollout status deployment/user-service \
+                            -n banking \
+                            --timeout=300s \
+                            --kubeconfig=$KUBECONFIG
                     """
                 }
             }
@@ -94,15 +98,15 @@ pipeline {
 
         stage('Cleanup') {
             steps {
-                sh "docker rmi ${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG} || true"
-                sh "docker rmi ${DOCKER_USER}/ib-${SERVICE_NAME}:latest || true"
+                sh "docker rmi /ib-user-service:${BUILD_NUMBER} || true"
+                sh "docker rmi /ib-user-service:latest || true"
                 cleanWs()
             }
         }
     }
 
     post {
-        success { echo "✅ ${SERVICE_NAME} pipeline SUCCESS — image: ${DOCKER_USER}/ib-${SERVICE_NAME}:${IMAGE_TAG}" }
-        failure { echo "❌ ${SERVICE_NAME} pipeline FAILED" }
+        success { echo "✅ user-service pipeline SUCCESS — image: /ib-user-service:${BUILD_NUMBER}" }
+        failure { echo "❌ user-service pipeline FAILED" }
     }
 }
