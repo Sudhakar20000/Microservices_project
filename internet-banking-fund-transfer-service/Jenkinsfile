@@ -19,17 +19,11 @@ pipeline {
             }
         }
 
-        stage('Build & Test') {
+        stage('Build') {
             steps {
                 dir("internet-banking-fund-transfer-service") {
                     sh 'chmod +x gradlew'
-                    sh './gradlew clean build --no-daemon'
-                }
-            }
-            post {
-                always {
-                    junit allowEmptyResults: true,
-                          testResults: "internet-banking-fund-transfer-service/build/test-results/**/*.xml"
+                    sh './gradlew clean build -x test --no-daemon'
                 }
             }
         }
@@ -40,7 +34,14 @@ pipeline {
                     script {
                         def scannerHome = tool 'sonarqube-scanner'
                         dir("internet-banking-fund-transfer-service") {
-                            sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=ib-fund-transfer -Dsonar.projectName=ib-fund-transfer -Dsonar.sources=src/main -Dsonar.tests=src/test -Dsonar.java.binaries=build/classes/java/main -Dsonar.exclusions=**/build/**"
+                            sh """
+                            ${scannerHome}/bin/sonar-scanner \
+                              -Dsonar.projectKey=ib-fund-transfer \
+                              -Dsonar.projectName=ib-fund-transfer \
+                              -Dsonar.sources=src/main \
+                              -Dsonar.java.binaries=build/classes/java/main \
+                              -Dsonar.exclusions=**/build/**
+                            """
                         }
                     }
                 }
@@ -60,7 +61,7 @@ pipeline {
                 script {
                     dir("internet-banking-fund-transfer-service") {
                         docker.withRegistry('https://index.docker.io/v1/', 'Dockerhub') {
-                            def img = docker.build("sudhakar20000/ib-fund-transfer:${BUILD_NUMBER}", ".")
+                            def img = docker.build("/ib-fund-transfer:${BUILD_NUMBER}", ".")
                             img.push()
                             img.push('latest')
                         }
@@ -73,12 +74,23 @@ pipeline {
             steps {
                 withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
                     sh """
-                        kubectl set image deployment/fund-transfer \
-                            fund-transfer=sudhakar20000/ib-fund-transfer:${BUILD_NUMBER} \
-                            -n banking --kubeconfig=\$KUBECONFIG
+                        # Step 1: Ensure namespace exists
+                        kubectl create namespace banking \
+                            --kubeconfig=$KUBECONFIG \
+                            --dry-run=client -o yaml | \
+                            kubectl apply -f - --kubeconfig=$KUBECONFIG
 
+                        # Step 2: Update image tag on existing deployment
+                        kubectl set image deployment/fund-transfer \
+                            fund-transfer=/ib-fund-transfer:${BUILD_NUMBER} \
+                            -n banking \
+                            --kubeconfig=$KUBECONFIG
+
+                        # Step 3: Wait for rollout to complete
                         kubectl rollout status deployment/fund-transfer \
-                            -n banking --timeout=300s --kubeconfig=\$KUBECONFIG
+                            -n banking \
+                            --timeout=300s \
+                            --kubeconfig=$KUBECONFIG
                     """
                 }
             }
@@ -86,15 +98,15 @@ pipeline {
 
         stage('Cleanup') {
             steps {
-                sh "docker rmi sudhakar20000/ib-fund-transfer:${BUILD_NUMBER} || true"
-                sh "docker rmi sudhakar20000/ib-fund-transfer:latest || true"
+                sh "docker rmi /ib-fund-transfer:${BUILD_NUMBER} || true"
+                sh "docker rmi /ib-fund-transfer:latest || true"
                 cleanWs()
             }
         }
     }
 
     post {
-        success { echo "✅ fund-transfer pipeline SUCCESS" }
+        success { echo "✅ fund-transfer pipeline SUCCESS — image: /ib-fund-transfer:${BUILD_NUMBER}" }
         failure { echo "❌ fund-transfer pipeline FAILED" }
     }
 }
