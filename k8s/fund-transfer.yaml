@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fund-transfer
+  namespace: banking
+  labels:
+    app: fund-transfer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fund-transfer
+  template:
+    metadata:
+      labels:
+        app: fund-transfer
+    spec:
+      containers:
+        - name: fund-transfer
+          image: sudhakar20000/ib-fund-transfer:latest
+          ports:
+            - containerPort: 8084
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fund-transfer
+  namespace: banking
+spec:
+  selector:
+    app: fund-transfer
+  ports:
+    - port: 8084
+      targetPort: 8084
+  type: ClusterIP

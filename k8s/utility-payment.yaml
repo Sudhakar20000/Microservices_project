@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: utility-payment
+  namespace: banking
+  labels:
+    app: utility-payment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: utility-payment
+  template:
+    metadata:
+      labels:
+        app: utility-payment
+    spec:
+      containers:
+        - name: utility-payment
+          image: sudhakar20000/ib-utility-payment:latest
+          ports:
+            - containerPort: 8085
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: utility-payment
+  namespace: banking
+spec:
+  selector:
+    app: utility-payment
+  ports:
+    - port: 8085
+      targetPort: 8085
+  type: ClusterIP

@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core-banking
+  namespace: banking
+  labels:
+    app: core-banking
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: core-banking
+  template:
+    metadata:
+      labels:
+        app: core-banking
+    spec:
+      containers:
+        - name: core-banking
+          image: sudhakar20000/ib-core-banking:latest
+          ports:
+            - containerPort: 8092
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: core-banking
+  namespace: banking
+spec:
+  selector:
+    app: core-banking
+  ports:
+    - port: 8092
+      targetPort: 8092
+  type: ClusterIP
