@@ -3,8 +3,6 @@ kind: Deployment
 metadata:
   name: api-gateway
   namespace: banking
-  labels:
-    app: api-gateway
 spec:
   replicas: 1
   selector:
@@ -15,11 +13,73 @@ spec:
       labels:
         app: api-gateway
     spec:
+      initContainers:
+        - name: wait-for-eureka
+          image: busybox
+          command: ['sh','-c','until nc -z service-registry 8081; do sleep 3; done']
+        - name: wait-for-keycloak
+          image: busybox
+          command: ['sh','-c','until nc -z keycloak 8080; do sleep 3; done']
       containers:
         - name: api-gateway
           image: sudhakar20000/ib-api-gateway:latest
           ports:
             - containerPort: 8082
+          env:
+            - name: SERVER_PORT
+              value: "8082"
+            - name: SPRING_PROFILES_ACTIVE
+              value: "docker"
+            - name: SPRING_CLOUD_CONFIG_ENABLED
+              value: "false"
+            - name: SPRING_CONFIG_IMPORT
+              value: "optional:configserver:"
+            - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
+              value: "http://service-registry:8081/eureka/"
+            - name: EUREKA_INSTANCE_HOSTNAME
+              value: "api-gateway"
+            - name: EUREKA_INSTANCE_PREFERIPADDRESS
+              value: "true"
+            - name: APP_CONFIG_KEYCLOAK_URL
+              value: "http://keycloak:8080"
+            - name: APP_CONFIG_KEYCLOAK_REALM
+              value: "javatodev-internet-banking"
+            - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI
+              value: "http://keycloak:8080/realms/javatodev-internet-banking/protocol/openid-connect/certs"
+            - name: MANAGEMENT_ZIPKIN_TRACING_ENDPOINT
+              value: "http://zipkin:9411/api/v2/spans"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[0]_ID
+              value: "internet-banking-user-service"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[0]_URI
+              value: "http://user-service:8083"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[0]_PREDICATES[0]
+              value: "Path=/user/**"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[0]_FILTERS[0]
+              value: "StripPrefix=1"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[1]_ID
+              value: "internet-banking-fund-transfer-service"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[1]_URI
+              value: "http://fund-transfer:8084"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[1]_PREDICATES[0]
+              value: "Path=/fund-transfer/**"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[1]_FILTERS[0]
+              value: "StripPrefix=1"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[2]_ID
+              value: "internet-banking-utility-payment-service"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[2]_URI
+              value: "http://utility-payment:8085"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[2]_PREDICATES[0]
+              value: "Path=/utility-payment/**"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[2]_FILTERS[0]
+              value: "StripPrefix=1"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[3]_ID
+              value: "core-banking-service"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[3]_URI
+              value: "http://core-banking:8092"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[3]_PREDICATES[0]
+              value: "Path=/banking-core/**"
+            - name: SPRING_CLOUD_GATEWAY_ROUTES[3]_FILTERS[0]
+              value: "StripPrefix=1"
           resources:
             requests:
               memory: "256Mi"
