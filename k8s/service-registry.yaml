@@ -3,8 +3,6 @@ kind: Deployment
 metadata:
   name: service-registry
   namespace: banking
-  labels:
-    app: service-registry
 spec:
   replicas: 1
   selector:
@@ -20,6 +18,9 @@ spec:
           image: sudhakar20000/ib-service-registry:latest
           ports:
             - containerPort: 8081
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "docker"
           resources:
             requests:
               memory: "256Mi"
@@ -39,4 +40,3 @@ spec:
   ports:
     - port: 8081
       targetPort: 8081
-  type: ClusterIP

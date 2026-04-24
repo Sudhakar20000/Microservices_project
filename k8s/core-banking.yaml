@@ -3,8 +3,6 @@ kind: Deployment
 metadata:
   name: core-banking
   namespace: banking
-  labels:
-    app: core-banking
 spec:
   replicas: 1
   selector:
@@ -15,11 +13,28 @@ spec:
       labels:
         app: core-banking
     spec:
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox
+          command: ['sh', '-c', 'until nc -z mysql 3306; do echo waiting for mysql; sleep 3; done']
       containers:
         - name: core-banking
           image: sudhakar20000/ib-core-banking:latest
           ports:
             - containerPort: 8092
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:mysql://mysql:3306/banking_core?useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: "root"
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: "root1234"
+            - name: SPRING_PROFILES_ACTIVE
+              value: "docker"
+            - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
+              value: "http://service-registry:8081/eureka/"
+            - name: SPRING_ZIPKIN_BASE_URL
+              value: "http://zipkin:9411"
           resources:
             requests:
               memory: "256Mi"
@@ -39,4 +54,3 @@ spec:
   ports:
     - port: 8092
       targetPort: 8092
-  type: ClusterIP

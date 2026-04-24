@@ -1,0 +1,62 @@
+# Generate all K8s deployment + service YAMLs
+
+declare -A SERVICES=(
+  ["api-gateway"]="internet-banking-api-gateway|8082"
+  ["config-server"]="internet-banking-config-server|8090"
+  ["service-registry"]="internet-banking-service-registry|8081"
+  ["user-service"]="internet-banking-user-service|8083"
+  ["fund-transfer"]="internet-banking-fund-transfer-service|8084"
+  ["utility-payment"]="internet-banking-utility-payment-service|8085"
+  ["core-banking"]="core-banking-service|8092"
+)
+
+for NAME in "${!SERVICES[@]}"; do
+    IFS='|' read -r DIR PORT <<< "${SERVICES[$NAME]}"
+
+cat > "k8s/${NAME}.yaml" << YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${NAME}
+  namespace: banking
+  labels:
+    app: ${NAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${NAME}
+  template:
+    metadata:
+      labels:
+        app: ${NAME}
+    spec:
+      containers:
+        - name: ${NAME}
+          image: sudhakar20000/ib-${NAME}:latest
+          ports:
+            - containerPort: ${PORT}
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${NAME}
+  namespace: banking
+spec:
+  selector:
+    app: ${NAME}
+  ports:
+    - port: ${PORT}
+      targetPort: ${PORT}
+  type: ClusterIP
+YAML
+
+    echo "✅ Created k8s/${NAME}.yaml"
+done
