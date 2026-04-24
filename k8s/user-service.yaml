@@ -3,8 +3,6 @@ kind: Deployment
 metadata:
   name: user-service
   namespace: banking
-  labels:
-    app: user-service
 spec:
   replicas: 1
   selector:
@@ -15,11 +13,44 @@ spec:
       labels:
         app: user-service
     spec:
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox
+          command: ['sh','-c','until nc -z mysql 3306; do echo waiting; sleep 3; done']
+        - name: wait-for-eureka
+          image: busybox
+          command: ['sh','-c','until nc -z service-registry 8081; do echo waiting; sleep 3; done']
+        - name: wait-for-keycloak
+          image: busybox
+          command: ['sh','-c','until nc -z keycloak 8080; do echo waiting; sleep 3; done']
       containers:
         - name: user-service
           image: sudhakar20000/ib-user-service:latest
           ports:
             - containerPort: 8083
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "docker"
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:mysql://mysql:3306/banking_core?useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: "root"
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: "root1234"
+            - name: EUREKA_CLIENT_SERVICEURL_DEFAULTZONE
+              value: "http://service-registry:8081/eureka/"
+            - name: SPRING_ZIPKIN_BASE_URL
+              value: "http://zipkin:9411"
+            - name: APP_CONFIG_KEYCLOAK_SERVER_URL
+              value: "http://keycloak:8080"
+            - name: APP_CONFIG_KEYCLOAK_REALM
+              value: "javatodev-internet-banking"
+            - name: APP_CONFIG_KEYCLOAK_CLIENTID
+              value: "internet-banking-api-client"
+            - name: APP_CONFIG_KEYCLOAK_CLIENT_SECRET
+              value: "YOUR_CLIENT_SECRET"
+            - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI
+              value: "http://keycloak:8080/realms/javatodev-internet-banking/protocol/openid-connect/certs"
           resources:
             requests:
               memory: "256Mi"
@@ -39,4 +70,3 @@ spec:
   ports:
     - port: 8083
       targetPort: 8083
-  type: ClusterIP
