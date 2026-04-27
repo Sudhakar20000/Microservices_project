@@ -15,7 +15,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                echo "Building: user-service | Branch: ${env.BRANCH_NAME} | Tag: ${IMAGE_TAG}"
+                echo "Building: user-service | Branch: ${env.BRANCH_NAME} | Tag: ${BUILD_NUMBER}"
             }
         }
 
@@ -56,12 +56,14 @@ pipeline {
             }
         }
 
-        stage('Docker Build & Push') {
+        stage('Docker Build and Push') {
             steps {
                 script {
+                    def imageName = "sudhakar20000/user-service:${BUILD_NUMBER}"
                     dir("internet-banking-user-service") {
                         docker.withRegistry('https://index.docker.io/v1/', 'Dockerhub') {
-                            def img = docker.build("/ib-user-service:${BUILD_NUMBER}", ".")
+                            echo "Building Docker image: ${imageName}"
+                            def img = docker.build(imageName, ".")
                             img.push()
                             img.push('latest')
                         }
@@ -70,23 +72,67 @@ pipeline {
             }
         }
 
+        stage('Trivy Image Scan') {
+            steps {
+                script {
+                    def imageName = "sudhakar20000/user-service:${BUILD_NUMBER}"
+                    echo "Running Trivy security scan on: ${imageName}"
+
+                    sh """
+                        trivy image \
+                            --exit-code 0 \
+                            --severity LOW,MEDIUM,HIGH,CRITICAL \
+                            --format table \
+                            --output trivy-report-user-service.txt \
+                            --no-progress \
+                            ${imageName}
+
+                        echo "Trivy scan complete. Summary:"
+                        cat trivy-report-user-service.txt
+                    """
+
+                    sh """
+                        CRITICAL_COUNT=$(trivy image \
+                            --exit-code 0 \
+                            --severity CRITICAL \
+                            --format json \
+                            --no-progress \
+                            ${imageName} | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+count = sum(len(r.get('Vulnerabilities') or []) for r in data.get('Results', []))
+print(count)
+")
+                        echo "Critical vulnerabilities found: $CRITICAL_COUNT"
+                        if [ "$CRITICAL_COUNT" -gt 10 ]; then
+                            echo "WARNING: $CRITICAL_COUNT critical vulnerabilities in ${imageName}"
+                        fi
+                    """
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: "trivy-report-user-service.txt",
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                }
+            }
+        }
+
         stage('Deploy to Kubernetes') {
             steps {
                 withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
                     sh """
-                        # Step 1: Ensure namespace exists
                         kubectl create namespace banking \
                             --kubeconfig=$KUBECONFIG \
                             --dry-run=client -o yaml | \
                             kubectl apply -f - --kubeconfig=$KUBECONFIG
 
-                        # Step 2: Update image tag on existing deployment
                         kubectl set image deployment/user-service \
-                            user-service=/ib-user-service:${BUILD_NUMBER} \
+                            user-service=sudhakar20000/user-service:${BUILD_NUMBER} \
                             -n banking \
                             --kubeconfig=$KUBECONFIG
 
-                        # Step 3: Wait for rollout to complete
                         kubectl rollout status deployment/user-service \
                             -n banking \
                             --timeout=300s \
@@ -98,15 +144,19 @@ pipeline {
 
         stage('Cleanup') {
             steps {
-                sh "docker rmi /ib-user-service:${BUILD_NUMBER} || true"
-                sh "docker rmi /ib-user-service:latest || true"
+                sh "docker rmi sudhakar20000/user-service:${BUILD_NUMBER} || true"
+                sh "docker rmi sudhakar20000/user-service:latest || true"
                 cleanWs()
             }
         }
     }
 
     post {
-        success { echo "✅ user-service pipeline SUCCESS — image: /ib-user-service:${BUILD_NUMBER}" }
-        failure { echo "❌ user-service pipeline FAILED" }
+        success {
+            echo "user-service pipeline SUCCESS - image: sudhakar20000/user-service:${BUILD_NUMBER}"
+        }
+        failure {
+            echo "user-service pipeline FAILED"
+        }
     }
 }
